@@ -3,6 +3,9 @@ from typing import List
 from pydantic import BaseModel
 from app.agent import multimodal_agent
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+load_dotenv()
 
 ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave"}
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg"}
