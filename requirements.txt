@@ -3,5 +3,6 @@ uvicorn==0.28.0
 python-multipart==0.0.9
 langgraph==0.0.26
 langchain-openai==0.0.8
+langchain-groq==0.1.5
 pydantic==2.6.4
 openai==1.14.1
