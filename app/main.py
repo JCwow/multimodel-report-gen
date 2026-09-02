@@ -1,7 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import List
-
+from pydantic import BaseModel
 from app.agent import multimodal_agent
+from fastapi.middleware.cors import CORSMiddleware
 
 ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave"}
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg"}
@@ -11,6 +12,21 @@ app = FastAPI(
     description="結合 Whisper, GPT-4o Vision 與 LangGraph 的多模態會議分析服務",
     version="1.0.0",
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # 允許任何前端/網域存取
+    allow_credentials=True,
+    allow_methods=["*"],          # 允許 GET, POST 等所有 HTTP 方法
+    allow_headers=["*"],          # 允許所有 Header
+)
+class MeetingAnalysisData(BaseModel):
+    transcript: str
+    image_insights: List[str]
+    report: str
+
+class MeetingAnalysisResponse(BaseModel):
+    status: str
+    data: MeetingAnalysisData
 
 
 @app.get("/health")
@@ -18,7 +34,12 @@ async def health_check():
     return {"status": "healthy", "service": "Multimodal Agent API"}
 
 
-@app.post("/api/v1/analyze-meeting")
+@app.post(
+    "/api/v1/analyze-meeting", 
+    response_model=MeetingAnalysisResponse,
+    summary="多模態會議分析",
+    description="結合語音與圖片自動產出結構化 Markdown 報告"
+)
 async def analyze_meeting(
     audio: UploadFile = File(..., description="會議語音檔 (.mp3, .wav)"),
     images: List[UploadFile] = File([], description="簡報或白板截圖"),

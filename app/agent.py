@@ -1,7 +1,10 @@
+import os
 import base64
-from typing import TypedDict, List
+from typing import List
+from typing_extensions import TypedDict
+import httpx
 
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from openai import OpenAI
 
@@ -14,28 +17,59 @@ class AgentState(TypedDict):
     final_report: str
 
 
-_client = None
-_llm = None
+_groq_client = None
+_vision_llm = None
+_synthesis_llm = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI()
-    return _client
+def _get_groq_client() -> OpenAI:
+    """Uses Groq's OpenAI-compatible endpoint for Whisper audio transcription."""
+    global _groq_client
+    if _groq_client is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY environment variable is not set!")
+            
+        _groq_client = OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=api_key,
+            http_client=httpx.Client(trust_env=False),
+        )
+    return _groq_client
 
 
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
-    return _llm
+def _get_vision_llm() -> ChatGroq:
+    """Uses Groq's Llama 3.2 Vision model for processing images."""
+    global _vision_llm
+    if _vision_llm is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        _vision_llm = ChatGroq(
+            model="qwen/qwen3.6-27b",  # 👈 更新為 Groq 支援的 Vision 模型
+            temperature=0.2,
+            api_key=api_key,
+            http_client=httpx.Client(trust_env=False),
+        )
+    return _vision_llm
+
+
+def _get_synthesis_llm() -> ChatGroq:
+    """Uses Groq's Llama 3.3 70B model for report generation."""
+    global _synthesis_llm
+    if _synthesis_llm is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        _synthesis_llm = ChatGroq(
+            model="openai/gpt-oss-120b",
+            temperature=0.2,
+            api_key=api_key,
+            http_client=httpx.Client(trust_env=False),
+        )
+    return _synthesis_llm
 
 
 def speech_to_text_node(state: AgentState):
     audio_file = ("meeting.mp3", state["audio_bytes"], "audio/mp3")
-    transcript_res = _get_client().audio.transcriptions.create(
-        model="whisper-1",
+    transcript_res = _get_groq_client().audio.transcriptions.create(
+        model="whisper-large-v3",
         file=audio_file,
     )
     return {"transcript": transcript_res.text}
@@ -43,16 +77,18 @@ def speech_to_text_node(state: AgentState):
 
 def vision_analysis_node(state: AgentState):
     descriptions = []
+    vision_llm = _get_vision_llm()
+    
     for img_bytes in state["image_bytes_list"]:
         base64_image = base64.b64encode(img_bytes).decode("utf-8")
-        response = _get_llm().invoke(
+        response = vision_llm.invoke(
             [
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": "請詳細提取此會議簡報/白板截圖中的核心數據、圖表趨勢與關鍵文字：",
+                            "text": "請詳細提取此會議簡報/圖表截圖中的核心數據、趨勢與關鍵文字：",
                         },
                         {
                             "type": "image_url",
@@ -88,7 +124,8 @@ def synthesize_insights_node(state: AgentState):
 2. 📊 簡報數據與逐字稿交叉對照重點
 3. 💡 關鍵決策與 Action Items (需指派執行人與預計時程)
 """
-    report = _get_llm().invoke(prompt).content
+    synthesis_llm = _get_synthesis_llm()
+    report = synthesis_llm.invoke(prompt).content
     return {"final_report": report}
 
 
