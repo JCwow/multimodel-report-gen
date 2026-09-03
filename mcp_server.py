@@ -3,7 +3,12 @@ import sys
 import asyncio
 
 # 確保專案根目錄在 Python Module 搜尋路徑中
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(_ROOT)
+
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(_ROOT, ".env"))
 
 from mcp.server.mcpserver import MCPServer
 from app.agent import multimodal_agent
