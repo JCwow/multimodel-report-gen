@@ -1,22 +1,34 @@
+import logging
 import os
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from app.agent import multimodal_agent
-from app.claude_agent import claude_sdk_importable, run_claude_agent
-from app.config import AGENT_BACKEND, has_anthropic_credentials
+from app.claude_agent import (
+    claude_sdk_importable,
+    is_sdk_startup_error,
+    run_claude_agent,
+)
+from app.config import AGENT_BACKEND, has_anthropic_credentials, use_bedrock
 from app.sandbox import SandboxError, create_job_dir, relative_to_sandbox, write_bytes
 from app.vector_store import index_report, search_reports
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave"}
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg"}
+FALLBACK_PIPELINE = os.getenv("AGENT_FALLBACK_PIPELINE", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+}
 
 app = FastAPI(
     title="Multimodal Meeting Insights API",
@@ -39,6 +51,7 @@ class MeetingAnalysisData(BaseModel):
     report: str
     tools_used: List[str] = []
     backend: str = "pipeline"
+    warning: Optional[str] = None
 
 
 class MeetingAnalysisResponse(BaseModel):
@@ -64,6 +77,29 @@ def resolve_backend() -> str:
     return "pipeline"
 
 
+def _is_present_upload(upload: Optional[UploadFile]) -> bool:
+    return bool(upload is not None and upload.filename and upload.filename.strip())
+
+
+async def _run_pipeline(
+    audio_bytes: bytes, image_bytes_list: list[bytes]
+) -> Tuple[str, list, str, list[str]]:
+    initial_state = {
+        "audio_bytes": audio_bytes,
+        "image_bytes_list": image_bytes_list,
+        "transcript": "",
+        "image_descriptions": [],
+        "final_report": "",
+    }
+    final_state = await multimodal_agent.ainvoke(initial_state)
+    return (
+        final_state.get("transcript", ""),
+        final_state.get("image_descriptions", []),
+        final_state.get("final_report", ""),
+        ["speech_processor", "vision_processor", "synthesizer"],
+    )
+
+
 @app.get("/health", summary="健康檢查")
 async def health_check():
     backend = resolve_backend()
@@ -73,6 +109,7 @@ async def health_check():
         "backend": backend,
         "claude_sdk": claude_sdk_importable(),
         "anthropic_or_bedrock": has_anthropic_credentials(),
+        "bedrock_active": use_bedrock(),
     }
 
 
@@ -95,7 +132,7 @@ async def analyze_meeting(
             detail=f"不支援的音訊格式: {audio.content_type}。請上傳 .mp3 或 .wav 檔案。",
         )
 
-    uploaded_images = [img for img in [image1, image2, image3] if img is not None and img.filename]
+    uploaded_images = [img for img in [image1, image2, image3] if _is_present_upload(img)]
     image_bytes_list = []
     for image in uploaded_images:
         if image.content_type and image.content_type not in ALLOWED_IMAGE_TYPES:
@@ -114,36 +151,42 @@ async def analyze_meeting(
 
         backend = resolve_backend()
         tools_used: List[str] = []
+        warning: Optional[str] = None
+        raw_images = [data for _, data in image_bytes_list]
 
         if backend == "claude":
-            job_dir = create_job_dir()
-            audio_path = write_bytes(job_dir, audio.filename or "meeting.mp3", audio_bytes)
-            image_paths = [
-                write_bytes(job_dir, name or f"slide-{idx}.png", data)
-                for idx, (name, data) in enumerate(image_bytes_list, start=1)
-            ]
-            result = await run_claude_agent(
-                audio_path=relative_to_sandbox(audio_path),
-                image_paths=[relative_to_sandbox(path) for path in image_paths],
-                user_query=user_query,
-            )
-            transcript = result.get("transcript") or ""
-            image_insights = result.get("image_insights") or []
-            report = result.get("report") or ""
-            tools_used = result.get("tools_used") or []
+            try:
+                job_dir = create_job_dir()
+                audio_path = write_bytes(job_dir, audio.filename or "meeting.mp3", audio_bytes)
+                image_paths = [
+                    write_bytes(job_dir, name or f"slide-{idx}.png", data)
+                    for idx, (name, data) in enumerate(image_bytes_list, start=1)
+                ]
+                result = await run_claude_agent(
+                    audio_path=relative_to_sandbox(audio_path),
+                    image_paths=[relative_to_sandbox(path) for path in image_paths],
+                    user_query=user_query,
+                )
+                transcript = result.get("transcript") or ""
+                image_insights = result.get("image_insights") or []
+                report = result.get("report") or ""
+                tools_used = result.get("tools_used") or []
+            except Exception as exc:
+                if not (FALLBACK_PIPELINE and is_sdk_startup_error(exc)):
+                    raise
+                logger.warning("Claude Agent SDK unavailable, falling back to pipeline: %s", exc)
+                warning = (
+                    "Claude Agent SDK 無法完成請求，已改走 LangGraph pipeline。"
+                    f"原因：{exc}"
+                )
+                transcript, image_insights, report, tools_used = await _run_pipeline(
+                    audio_bytes, raw_images
+                )
+                backend = "pipeline"
         else:
-            initial_state = {
-                "audio_bytes": audio_bytes,
-                "image_bytes_list": [data for _, data in image_bytes_list],
-                "transcript": "",
-                "image_descriptions": [],
-                "final_report": "",
-            }
-            final_state = await multimodal_agent.ainvoke(initial_state)
-            transcript = final_state.get("transcript", "")
-            image_insights = final_state.get("image_descriptions", [])
-            report = final_state.get("final_report", "")
-            tools_used = ["speech_processor", "vision_processor", "synthesizer"]
+            transcript, image_insights, report, tools_used = await _run_pipeline(
+                audio_bytes, raw_images
+            )
 
         if report:
             meeting_id = str(uuid.uuid4())[:8]
@@ -165,6 +208,7 @@ async def analyze_meeting(
                 "report": report,
                 "tools_used": tools_used,
                 "backend": backend,
+                "warning": warning,
             },
         }
     except HTTPException:

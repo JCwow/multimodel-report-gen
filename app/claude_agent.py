@@ -7,20 +7,26 @@ call allowlisted MCP tools, which themselves go through app.sandbox.
 from __future__ import annotations
 
 import inspect
+import logging
 import os
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 from app.config import (
     AGENT_MAX_BUDGET_USD,
     AGENT_MAX_TURNS,
     AWS_REGION,
-    CLAUDE_CODE_USE_BEDROCK,
     MCP_TRANSPORT,
     ROOT,
+    bedrock_requested,
     has_anthropic_credentials,
+    use_bedrock,
 )
-from app.sandbox import SandboxError, sandbox_root
+from app.sandbox import sandbox_root
 from app.tools import (
     analyze_meeting_files,
     analyze_slides,
@@ -198,58 +204,97 @@ def build_mcp_servers() -> dict[str, Any]:
     return {"meetings": build_sdk_mcp_server()}
 
 
-async def _deny_builtins(tool_name: str, input_data: dict, context) -> Any:
-    from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+def _clear_macos_quarantine() -> None:
+    """First launch of the bundled CLI often hangs under Gatekeeper."""
+    try:
+        import claude_agent_sdk
+    except ImportError:
+        return
+    bundled = Path(claude_agent_sdk.__file__).resolve().parent / "_bundled" / "claude"
+    if not bundled.is_file():
+        return
+    try:
+        subprocess.run(
+            ["xattr", "-d", "com.apple.quarantine", str(bundled)],
+            check=False,
+            capture_output=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return
 
-    blocked = {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"}
-    if tool_name in blocked or tool_name.split()[0] in blocked:
-        return PermissionResultDeny(message="built-in filesystem/shell tools are disabled")
-    if "path" in input_data:
-        try:
-            from app.sandbox import resolve_sandbox_path
 
-            resolve_sandbox_path(str(input_data["path"]), must_exist=False, allow_create=True)
-        except SandboxError as exc:
-            return PermissionResultDeny(message=str(exc))
-    return PermissionResultAllow()
+def is_sdk_startup_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    markers = (
+        "control request timeout",
+        "claude code not found",
+        "cli not found",
+        "cli connection",
+        "could not load credentials",
+        "credit balance",
+        "invalid api key",
+        "authentication",
+        "api error",
+    )
+    return any(marker in text for marker in markers)
 
 
 def build_agent_options():
-    from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
+    from claude_agent_sdk import ClaudeAgentOptions
 
-    async def dummy_hook(input_data, tool_use_id, context):
-        return {"continue_": True}
+    _clear_macos_quarantine()
+
+    # Keep initialize from sitting on the default 60s timeout when the CLI hangs.
+    os.environ.setdefault("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "20000")
 
     env = {
         "API_TIMEOUT_MS": os.getenv("API_TIMEOUT_MS", "120000"),
         "CLAUDE_CODE_MAX_RETRIES": os.getenv("CLAUDE_CODE_MAX_RETRIES", "2"),
+        "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT": os.environ["CLAUDE_CODE_STREAM_CLOSE_TIMEOUT"],
+        # Prevent the AWS SDK from stalling on 169.254.169.254 during local runs.
+        "AWS_EC2_METADATA_DISABLED": os.getenv("AWS_EC2_METADATA_DISABLED", "true"),
     }
-    if CLAUDE_CODE_USE_BEDROCK:
+    for key in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"):
+        if os.getenv(key):
+            env[key] = os.environ[key]
+    if use_bedrock():
         env["CLAUDE_CODE_USE_BEDROCK"] = "1"
         env["AWS_REGION"] = AWS_REGION
+        env["AWS_EC2_METADATA_DISABLED"] = "false"
+    else:
+        # Inherited process env may have CLAUDE_CODE_USE_BEDROCK=1; overlay it off.
+        # Empty string is falsy in the CLI; do not use "0" (non-empty is truthy).
+        env["CLAUDE_CODE_USE_BEDROCK"] = ""
+        if bedrock_requested():
+            logger.warning(
+                "CLAUDE_CODE_USE_BEDROCK is set but AWS credentials were not found; "
+                "using ANTHROPIC_API_KEY instead"
+            )
 
-    return ClaudeAgentOptions(
+    stderr_chunks: list[str] = []
+
+    def _stderr(line: str) -> None:
+        stderr_chunks.append(line)
+        logger.warning("claude-cli: %s", line.rstrip())
+
+    options = ClaudeAgentOptions(
         system_prompt=SYSTEM_PROMPT,
         mcp_servers=build_mcp_servers(),
         tools=[],
         allowed_tools=MCP_TOOL_NAMES + ["mcp__meetings__*"],
         disallowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
-        permission_mode="acceptEdits",
-        can_use_tool=_deny_builtins,
-        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[dummy_hook])]},
+        permission_mode="dontAsk",
         max_turns=AGENT_MAX_TURNS,
         max_budget_usd=AGENT_MAX_BUDGET_USD,
-        cwd=str(sandbox_root()),
+        cwd=str(ROOT),
         setting_sources=[],
         strict_mcp_config=True,
         env=env,
-        output_format={"type": "json_schema", "schema": REPORT_SCHEMA},
-        sandbox={
-            "enabled": os.getenv("CLAUDE_SDK_SANDBOX", "0") in {"1", "true", "True"},
-            "allowUnsandboxedCommands": False,
-            "failIfUnavailable": False,
-        },
+        stderr=_stderr,
     )
+    options._stderr_chunks = stderr_chunks  # type: ignore[attr-defined]
+    return options
 
 
 def build_prompt(
@@ -307,14 +352,21 @@ async def run_claude_agent(
     tools_used: list[str] = []
     final_text = ""
     structured: dict[str, Any] | None = None
+    options = build_agent_options()
 
-    async for message in query(prompt=prompt, options=build_agent_options()):
-        tools_used.extend(_tool_names_from_message(message))
-        if isinstance(message, ResultMessage):
-            final_text = message.result or ""
-            structured_attr = getattr(message, "structured_output", None)
-            if isinstance(structured_attr, dict):
-                structured = structured_attr
+    try:
+        async for message in query(prompt=prompt, options=options):
+            tools_used.extend(_tool_names_from_message(message))
+            if isinstance(message, ResultMessage):
+                final_text = message.result or ""
+                structured_attr = getattr(message, "structured_output", None)
+                if isinstance(structured_attr, dict):
+                    structured = structured_attr
+    except Exception as exc:
+        stderr = "".join(getattr(options, "_stderr_chunks", []) or [])
+        if stderr:
+            raise RuntimeError(f"{exc}\nclaude-cli stderr:\n{stderr[-4000:]}") from exc
+        raise
 
     if structured:
         report = structured.get("report") or final_text

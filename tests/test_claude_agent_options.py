@@ -1,4 +1,9 @@
-from app.claude_agent import MCP_TOOL_NAMES, SYSTEM_PROMPT, build_prompt
+from app.claude_agent import (
+    MCP_TOOL_NAMES,
+    SYSTEM_PROMPT,
+    build_prompt,
+    is_sdk_startup_error,
+)
 
 
 def test_system_prompt_requires_action_items():
@@ -20,3 +25,9 @@ def test_prompt_includes_sandbox_paths():
     assert "jobs/abc/meeting.mp3" in text
     assert "slide.png" in text
     assert "Q2" in text
+
+
+def test_sdk_startup_error_detects_initialize_timeout():
+    assert is_sdk_startup_error(Exception("Control request timeout: initialize"))
+    assert is_sdk_startup_error(Exception("Credit balance is too low"))
+    assert not is_sdk_startup_error(Exception("GROQ_API_KEY is missing"))

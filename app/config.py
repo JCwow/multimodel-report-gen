@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 ROOT = Path(__file__).resolve().parent.parent
 
 SANDBOX_ROOT = Path(os.getenv("SANDBOX_ROOT", ROOT / "sandbox_workspace")).resolve()
@@ -24,15 +28,35 @@ AWS_MEETING_BUCKET = os.getenv("AWS_MEETING_BUCKET", "")
 AWS_MEETING_PREFIX = os.getenv("AWS_MEETING_PREFIX", "meetings/")
 INTERNAL_API_BASE_URL = os.getenv("INTERNAL_API_BASE_URL", "").rstrip("/")
 
-CLAUDE_CODE_USE_BEDROCK = os.getenv("CLAUDE_CODE_USE_BEDROCK", "").strip() in {
-    "1",
-    "true",
-    "True",
-    "yes",
-}
+def bedrock_requested() -> bool:
+    return os.getenv("CLAUDE_CODE_USE_BEDROCK", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def has_aws_credentials() -> bool:
+    """True only when boto3 can actually resolve a credential provider."""
+    try:
+        import boto3
+
+        session = boto3.Session()
+        return session.get_credentials() is not None
+    except Exception:
+        return False
+
+
+def use_bedrock() -> bool:
+    """Bedrock is requested and AWS credentials exist. Otherwise the CLI hangs
+    trying IMDS / credential providers, which surfaces as initialize timeout.
+    """
+    return bedrock_requested() and has_aws_credentials()
+
+
+def has_anthropic_api_key() -> bool:
+    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"))
 
 
 def has_anthropic_credentials() -> bool:
-    if CLAUDE_CODE_USE_BEDROCK:
-        return True
-    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"))
+    return use_bedrock() or has_anthropic_api_key()
