@@ -1,0 +1,86 @@
+{
+  "executionRole": {
+    "RoleName": "meeting-insights-execution",
+    "Policies": [
+      {
+        "PolicyName": "ecs-execution",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecr:GetAuthorizationToken",
+              "ecr:BatchCheckLayerAvailability",
+              "ecr:GetDownloadUrlForLayer",
+              "ecr:BatchGetImage",
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": ["secretsmanager:GetSecretValue"],
+            "Resource": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:meeting-insights/*"
+          }
+        ]
+      }
+    ]
+  },
+  "taskRole": {
+    "RoleName": "meeting-insights-task",
+    "Policies": [
+      {
+        "PolicyName": "bedrock-invoke",
+        "Statement": [
+          {
+            "Sid": "BedrockClaude",
+            "Effect": "Allow",
+            "Action": [
+              "bedrock:InvokeModel",
+              "bedrock:InvokeModelWithResponseStream"
+            ],
+            "Resource": [
+              "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-*",
+              "arn:aws:bedrock:us-east-1:ACCOUNT_ID:inference-profile/*"
+            ]
+          }
+        ]
+      },
+      {
+        "PolicyName": "s3-meetings-prefix",
+        "Statement": [
+          {
+            "Sid": "ListPrefixOnly",
+            "Effect": "Allow",
+            "Action": ["s3:ListBucket"],
+            "Resource": "arn:aws:s3:::MEETING_BUCKET",
+            "Condition": {
+              "StringLike": { "s3:prefix": ["meetings/*"] }
+            }
+          },
+          {
+            "Sid": "ReadWriteMeetingsPrefix",
+            "Effect": "Allow",
+            "Action": ["s3:GetObject", "s3:PutObject"],
+            "Resource": "arn:aws:s3:::MEETING_BUCKET/meetings/*"
+          }
+        ]
+      },
+      {
+        "PolicyName": "deny-secrets-escape",
+        "Statement": [
+          {
+            "Sid": "NoIamOrSecretsFromTask",
+            "Effect": "Deny",
+            "Action": [
+              "iam:*",
+              "sts:AssumeRole",
+              "secretsmanager:GetSecretValue"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+    ]
+  }
+}

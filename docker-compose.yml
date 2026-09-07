@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   qdrant:
@@ -9,6 +9,23 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
+
+  agent:
+    build: .
+    container_name: meeting_insights_agent
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      SANDBOX_ROOT: /tmp/sandbox
+      AGENT_BACKEND: ${AGENT_BACKEND:-auto}
+    depends_on:
+      - qdrant
+    tmpfs:
+      - /tmp/sandbox:size=256m,mode=700
 
 volumes:
   qdrant_storage:

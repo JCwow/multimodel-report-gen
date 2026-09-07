@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Meeting Insights Agent on ECS Fargate with Bedrock IAM and CloudWatch logs.
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: ECR image URI for the agent container
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  AssignedPublicIp:
+    Type: String
+    Default: ENABLED
+    AllowedValues: [ENABLED, DISABLED]
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 4
+  Cpu:
+    Type: String
+    Default: "1024"
+    AllowedValues: ["512", "1024", "2048"]
+  Memory:
+    Type: String
+    Default: "2048"
+    AllowedValues: ["1024", "2048", "4096"]
+  MeetingBucketName:
+    Type: String
+    Default: ""
+    Description: Optional existing bucket. Leave empty to skip S3 policy resources.
+
+Conditions:
+  HasBucket: !Not [!Equals [!Ref MeetingBucketName, ""]]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/meeting-insights-agent
+      RetentionInDays: 14
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: meeting-insights-execution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:meeting-insights/*
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: meeting-insights-task
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: bedrock
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-*
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
+
+  S3PrefixPolicy:
+    Type: AWS::IAM::Policy
+    Condition: HasBucket
+    Properties:
+      PolicyName: s3-meetings-prefix
+      Roles: [!Ref TaskRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: s3:ListBucket
+            Resource: !Sub arn:aws:s3:::${MeetingBucketName}
+            Condition:
+              StringLike:
+                s3:prefix: meetings/*
+          - Effect: Allow
+            Action: [s3:GetObject, s3:PutObject]
+            Resource: !Sub arn:aws:s3:::${MeetingBucketName}/meetings/*
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: meeting-insights
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: meeting-insights-agent
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: agent
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          Environment:
+            - Name: SANDBOX_ROOT
+              Value: /tmp/sandbox
+            - Name: AGENT_BACKEND
+              Value: claude
+            - Name: CLAUDE_CODE_USE_BEDROCK
+              Value: "1"
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: AGENT_MAX_TURNS
+              Value: "12"
+            - Name: AGENT_MAX_BUDGET_USD
+              Value: "0.50"
+            - Name: AWS_MEETING_PREFIX
+              Value: meetings/
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: agent
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: meeting insights agent
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 10.0.0.0/8
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: meeting-insights-agent
+      Cluster: !Ref Cluster
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignedPublicIp
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref SecurityGroup
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster
+  ServiceName:
+    Value: !Ref Service
+  TaskRoleArn:
+    Value: !GetAtt TaskRole.Arn

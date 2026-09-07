@@ -1,0 +1,10 @@
+{
+  "tools_used": [
+    "transcribe_audio",
+    "analyze_slides",
+    "lookup_employee",
+    "query_historical_meetings",
+    "synthesize_report"
+  ],
+  "prompt": "分析沙箱中的會議錄音與簡報，對照上次 Q2 決議，並幫 Action Items 補上內部目錄的負責人。"
+}

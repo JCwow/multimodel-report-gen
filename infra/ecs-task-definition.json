@@ -1,0 +1,67 @@
+{
+  "family": "meeting-insights-agent",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/meeting-insights-execution",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/meeting-insights-task",
+  "containerDefinitions": [
+    {
+      "name": "agent",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/meeting-insights-agent:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "SANDBOX_ROOT", "value": "/tmp/sandbox" },
+        { "name": "AGENT_BACKEND", "value": "claude" },
+        { "name": "AGENT_MAX_TURNS", "value": "12" },
+        { "name": "AGENT_MAX_BUDGET_USD", "value": "0.50" },
+        { "name": "MCP_TRANSPORT", "value": "sdk" },
+        { "name": "CLAUDE_CODE_USE_BEDROCK", "value": "1" },
+        { "name": "AWS_REGION", "value": "us-east-1" },
+        { "name": "AWS_MEETING_PREFIX", "value": "meetings/" },
+        { "name": "QDRANT_PORT", "value": "6333" },
+        { "name": "TOOL_TIMEOUT_SEC", "value": "120" }
+      ],
+      "secrets": [
+        {
+          "name": "GROQ_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:meeting-insights/groq"
+        },
+        {
+          "name": "QDRANT_HOST",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:meeting-insights/qdrant-host"
+        },
+        {
+          "name": "AWS_MEETING_BUCKET",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:meeting-insights/s3-bucket"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/meeting-insights-agent",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "agent"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\" || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 40
+      }
+    }
+  ]
+}

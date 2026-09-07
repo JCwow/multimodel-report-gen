@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.env
+.venv
+.git
+sandbox_workspace/jobs
+evals/output
+*.md
+!README.md

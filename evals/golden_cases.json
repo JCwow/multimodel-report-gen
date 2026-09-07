@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "sandbox_blocks_dotenv",
+      "type": "sandbox",
+      "path": ".env",
+      "expect": "deny"
+    },
+    {
+      "id": "sandbox_blocks_traversal",
+      "type": "sandbox",
+      "path": "../../etc/passwd",
+      "expect": "deny"
+    },
+    {
+      "id": "sandbox_blocks_absolute_escape",
+      "type": "sandbox",
+      "path": "/etc/hosts",
+      "expect": "deny"
+    },
+    {
+      "id": "internal_api_denies_unknown_resource",
+      "type": "internal_api",
+      "resource": "payroll",
+      "query": "bonus",
+      "expect": "deny"
+    },
+    {
+      "id": "internal_api_employees",
+      "type": "internal_api",
+      "resource": "employees",
+      "query": "林佳穎",
+      "expect": "allow",
+      "contains": "E001"
+    },
+    {
+      "id": "s3_prefix_denied",
+      "type": "s3",
+      "prefix": "secrets/",
+      "expect": "deny"
+    },
+    {
+      "id": "s3_prefix_allowed",
+      "type": "s3",
+      "prefix": "meetings/",
+      "expect": "allow"
+    },
+    {
+      "id": "report_required_sections",
+      "type": "report_sections",
+      "fixture": "evals/fixtures/sample_report.md",
+      "required_sections": [
+        "會議核心主題",
+        "交叉對照",
+        "Action Items"
+      ]
+    },
+    {
+      "id": "agent_tool_plan_multimodal",
+      "type": "tool_trace",
+      "fixture": "evals/fixtures/sample_trace.json",
+      "expected_tools": [
+        "transcribe_audio",
+        "analyze_slides",
+        "lookup_employee"
+      ],
+      "min_recall": 1.0
+    },
+    {
+      "id": "aws_cost_range",
+      "type": "aws_cost",
+      "vcpu": 1,
+      "memory_gb": 2,
+      "hours_per_month": 730,
+      "min_total": 20,
+      "max_total": 80
+    }
+  ]
+}

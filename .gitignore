@@ -10,4 +10,7 @@ build/
 .pytest_cache/
 .mypy_cache/
 .DS_Store
-.env
+.coverage
+htmlcov/
+evals/output/
+sandbox_workspace/jobs/
