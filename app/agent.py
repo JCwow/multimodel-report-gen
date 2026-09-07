@@ -39,13 +39,15 @@ def _get_groq_client() -> OpenAI:
 
 
 def _get_vision_llm() -> ChatGroq:
-    """Uses Groq's Llama 3.2 Vision model for processing images."""
+    """Uses Groq's vision-capable model. max_tokens must stay under Groq OTPM."""
     global _vision_llm
     if _vision_llm is None:
         api_key = os.getenv("GROQ_API_KEY")
+        max_tokens = int(os.getenv("GROQ_VISION_MAX_TOKENS", "512"))
         _vision_llm = ChatGroq(
-            model="qwen/qwen3.6-27b",  # 👈 更新為 Groq 支援的 Vision 模型
+            model=os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b"),
             temperature=0.2,
+            max_tokens=max_tokens,
             api_key=api_key,
             http_client=httpx.Client(trust_env=False),
         )
@@ -53,13 +55,15 @@ def _get_vision_llm() -> ChatGroq:
 
 
 def _get_synthesis_llm() -> ChatGroq:
-    """Uses Groq's Llama 3.3 70B model for report generation."""
+    """Report synthesis. Cap output so on-demand OTPM (often 1000) is not exceeded."""
     global _synthesis_llm
     if _synthesis_llm is None:
         api_key = os.getenv("GROQ_API_KEY")
+        max_tokens = int(os.getenv("GROQ_SYNTHESIS_MAX_TOKENS", "800"))
         _synthesis_llm = ChatGroq(
-            model="openai/gpt-oss-120b",
+            model=os.getenv("GROQ_SYNTHESIS_MODEL", "openai/gpt-oss-120b"),
             temperature=0.2,
+            max_tokens=max_tokens,
             api_key=api_key,
             http_client=httpx.Client(trust_env=False),
         )
@@ -88,7 +92,7 @@ def vision_analysis_node(state: AgentState):
                     "content": [
                         {
                             "type": "text",
-                            "text": "請詳細提取此會議簡報/圖表截圖中的核心數據、趨勢與關鍵文字：",
+                            "text": "請用條列提取此簡報/圖表的核心數據、趨勢與關鍵文字，控制在 200 字內。",
                         },
                         {
                             "type": "image_url",
