@@ -279,21 +279,26 @@ def build_agent_options():
         stderr_chunks.append(line)
         logger.warning("claude-cli: %s", line.rstrip())
 
+    options_kwargs = {
+        "system_prompt": SYSTEM_PROMPT,
+        "mcp_servers": build_mcp_servers(),
+        "tools": [],
+        "allowed_tools": MCP_TOOL_NAMES + ["mcp__meetings__*"],
+        "disallowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
+        "permission_mode": "dontAsk",
+        "max_turns": AGENT_MAX_TURNS,
+        "max_budget_usd": AGENT_MAX_BUDGET_USD,
+        "cwd": str(ROOT),
+        "setting_sources": [],
+        "strict_mcp_config": True,
+        "env": env,
+        "stderr": _stderr,
+    }
+    if use_bedrock() and CLAUDE_MODEL:
+        options_kwargs["model"] = CLAUDE_MODEL
+
     options = ClaudeAgentOptions(
-        system_prompt=SYSTEM_PROMPT,
-        mcp_servers=build_mcp_servers(),
-        tools=[],
-        allowed_tools=MCP_TOOL_NAMES + ["mcp__meetings__*"],
-        disallowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
-        permission_mode="dontAsk",
-        max_turns=AGENT_MAX_TURNS,
-        max_budget_usd=AGENT_MAX_BUDGET_USD,
-        model=CLAUDE_MODEL,
-        cwd=str(ROOT),
-        setting_sources=[],
-        strict_mcp_config=True,
-        env=env,
-        stderr=_stderr,
+        **options_kwargs,
     )
     options._stderr_chunks = stderr_chunks  # type: ignore[attr-defined]
     return options

@@ -18,7 +18,7 @@ MAX_FILE_BYTES = int(os.getenv("MAX_FILE_BYTES", str(25 * 1024 * 1024)))
 AGENT_BACKEND = os.getenv("AGENT_BACKEND", "auto").strip().lower()
 AGENT_MAX_TURNS = int(os.getenv("AGENT_MAX_TURNS", "12"))
 AGENT_MAX_BUDGET_USD = float(os.getenv("AGENT_MAX_BUDGET_USD", "0.50"))
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "us.anthropic.claude-opus-4-5-20251101-v1:0")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "").strip()
 MCP_TRANSPORT = os.getenv("MCP_TRANSPORT", "sdk").strip().lower()
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
