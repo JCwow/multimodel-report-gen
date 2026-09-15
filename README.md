@@ -210,7 +210,12 @@ tests/                 pytest
 3. MCP：`payroll` deny，再對照 `employees` allow
 4. `pytest` 或 `python -m evals.runner` 全過
 5. 打開 `infra/cloudformation.yaml` 講 Fargate CPU/Memory 與 IAM；用 `estimate_aws_cost` 講成本 
-＃例子：
-`python mcp_client.py call estimate_aws_cost \ --args '{"vcpu":1,"memory_gb":2}'`
+```bash
+# 成本 Demo 指令：
+python mcp_client.py call estimate_aws_cost \ --args '{"vcpu":1,"memory_gb":2}'
+# 輸出中的:
+"total_usd": 48.04
+```
+
 
 **開場：** 主迴圈是 Claude Agent SDK 的規劃與 Tool Use，不是寫死 DAG；Claude 路徑上 MCP 是內部系統唯一出口；安全是沙箱 + allowlist + IAM 疊加；Evals 不靠 live LLM 擋迴歸。內部目錄預設 fixture、Fargate 尚未部署到叢集——請照實講。
