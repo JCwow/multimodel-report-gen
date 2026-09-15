@@ -212,7 +212,8 @@ tests/                 pytest
 5. 打開 `infra/cloudformation.yaml` 講 Fargate CPU/Memory 與 IAM；用 `estimate_aws_cost` 講成本 
 ```bash
 # 成本 Demo 指令：
-python mcp_client.py call estimate_aws_cost \ --args '{"vcpu":1,"memory_gb":2}'
+python mcp_client.py call estimate_aws_cost \
+  --args '{"vcpu":1,"memory_gb":2}'
 # 輸出中的:
 "total_usd": 48.04
 ```
