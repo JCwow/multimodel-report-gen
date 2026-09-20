@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: meeting-insights-agent-config
+  labels:
+    app.kubernetes.io/name: meeting-insights-agent
+    app.kubernetes.io/component: api
+data:
+  AGENT_BACKEND: "auto"
+  AGENT_MAX_TURNS: "12"
+  AGENT_MAX_BUDGET_USD: "0.50"
+  MCP_TRANSPORT: "sdk"
+  QDRANT_HOST: "qdrant"
+  QDRANT_PORT: "6333"
+  SANDBOX_ROOT: "/tmp/sandbox"
+  TOOL_TIMEOUT_SEC: "120"
+  MAX_FILE_BYTES: "26214400"

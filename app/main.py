@@ -103,11 +103,16 @@ async def _run_pipeline(
 @app.get("/health", summary="健康檢查")
 async def health_check():
     backend = resolve_backend()
+    # A forced pipeline deployment must not import the optional Claude SDK just
+    # to answer a liveness/readiness probe. This also keeps minimal runtime
+    # images usable on platforms where the bundled Claude CLI is unavailable.
+    sdk_checked = AGENT_BACKEND != "pipeline"
     return {
         "status": "healthy",
         "service": "Multimodal Agent API",
         "backend": backend,
-        "claude_sdk": claude_sdk_importable(),
+        "claude_sdk": claude_sdk_importable() if sdk_checked else False,
+        "claude_sdk_checked": sdk_checked,
         "anthropic_or_bedrock": has_anthropic_credentials(),
         "bedrock_active": use_bedrock(),
     }
