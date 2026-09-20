@@ -10,6 +10,9 @@ data:
   AGENT_MAX_TURNS: "12"
   AGENT_MAX_BUDGET_USD: "0.50"
   MCP_TRANSPORT: "sdk"
+  # Use a model ID available to the deployment credential. Override per
+  # environment after checking Groq's authenticated /models endpoint.
+  GROQ_VISION_MODEL: "qwen/qwen3.8-27b"
   QDRANT_HOST: "qdrant"
   QDRANT_PORT: "6333"
   SANDBOX_ROOT: "/tmp/sandbox"

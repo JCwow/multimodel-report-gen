@@ -24,6 +24,10 @@ The deployment expects a Qdrant-compatible service called `qdrant` on port
 `6333` in the same namespace. Change `QDRANT_HOST` in `configmap.yaml` if it is
 managed elsewhere.
 
+`GROQ_VISION_MODEL` is set to `qwen/qwen3.8-27b`. Confirm that the Groq API key
+for each environment is entitled to that model by listing its authenticated
+`/models` endpoint; model access can differ by account or plan.
+
 ## Prepare an image
 
 Build and push the existing project `Dockerfile` to a trusted registry, then
