@@ -30,6 +30,12 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional existing bucket. Leave empty to skip S3 policy resources.
+  GroqSecretArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret whose value is the GROQ_API_KEY.
+  QdrantHost:
+    Type: String
+    Description: Private DNS name or IP address of a Qdrant endpoint reachable from the task subnets.
 
 Conditions:
   HasBucket: !Not [!Equals [!Ref MeetingBucketName, ""]]
@@ -149,6 +155,15 @@ Resources:
               Value: "0.50"
             - Name: AWS_MEETING_PREFIX
               Value: meetings/
+            - Name: QDRANT_HOST
+              Value: !Ref QdrantHost
+            - Name: QDRANT_PORT
+              Value: "6333"
+            - Name: GROQ_VISION_MODEL
+              Value: qwen/qwen3.8-27b
+          Secrets:
+            - Name: GROQ_API_KEY
+              ValueFrom: !Ref GroqSecretArn
           LogConfiguration:
             LogDriver: awslogs
             Options:

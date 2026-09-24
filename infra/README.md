@@ -40,6 +40,8 @@ docker tag $REPO:latest $ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
 docker push $ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
 
 aws secretsmanager create-secret --name meeting-insights/groq --secret-string "$GROQ_API_KEY"
+GROQ_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id meeting-insights/groq --query ARN --output text)
 
 aws cloudformation deploy \
   --stack-name meeting-insights \
@@ -49,9 +51,23 @@ aws cloudformation deploy \
       ImageUri=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:latest \
       VpcId=vpc-xxxxxxxx \
       SubnetIds=subnet-aaaa,subnet-bbbb \
+      GroqSecretArn=$GROQ_SECRET_ARN \
+      QdrantHost=qdrant.internal.example \
       Cpu=1024 \
       Memory=2048
 ```
+
+`QdrantHost` must resolve and be reachable from the selected task subnets. This
+stack deliberately does **not** create Qdrant, an ALB, a public DNS record, or
+an ingress rule for the service: choose those integrations for the target VPC
+instead of exposing the Agent by default. The supplied security group accepts
+port 8000 only from `10.0.0.0/8`; adjust that rule to the actual private client
+or load-balancer CIDR before deployment.
+
+`GroqSecretArn` is injected into the task as `GROQ_API_KEY` by ECS. The task
+role is intentionally denied direct Secrets Manager reads; the execution role
+performs the injection. Use the returned Secret ARN rather than constructing
+one, because AWS may append a suffix to a secret ARN.
 
 Bedrock 主控台需先 enable Claude 模型（建議 Haiku 做規劃、需要長報告再升 Sonnet）。
 

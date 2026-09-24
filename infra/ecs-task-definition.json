@@ -27,6 +27,7 @@
         { "name": "AGENT_MAX_TURNS", "value": "12" },
         { "name": "AGENT_MAX_BUDGET_USD", "value": "0.50" },
         { "name": "MCP_TRANSPORT", "value": "sdk" },
+        { "name": "GROQ_VISION_MODEL", "value": "qwen/qwen3.8-27b" },
         { "name": "CLAUDE_CODE_USE_BEDROCK", "value": "1" },
         { "name": "AWS_REGION", "value": "us-east-1" },
         { "name": "AWS_MEETING_PREFIX", "value": "meetings/" },
